@@ -1,7 +1,8 @@
 # Harness
 Interactive remote PowerShell Payload
 
-Description
+Description:
+
 Harness is remote access payload with the ability to provide a remote interactive PowerShell interface from a Windows system to virtually any TCP socket. The primary goal of the Harness Project is to provide a remote interface with the same capabilities and overall feel of the native PowerShell executable bundled with the Windows OS. 
 
 Payload Features:
