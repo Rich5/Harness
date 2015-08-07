@@ -11,7 +11,8 @@ Payload Features:
 -	Unmanaged payload allows for white list bypassing
 -	 Reflective payload allows for payload to be injected into other processes 
 
-License: 
+License:
+
 Unless otherwise indicated all original Harness code is release under the MIT license. However, ReflectiveHarness draws heavily from the following projects, and would otherwise not have been possible:
 
 https://github.com/leechristensen/UnmanagedPowerShell/tree/master/UnmanagedPowerShell
@@ -21,6 +22,7 @@ https://github.com/stephenfewer/ReflectiveDLLInjection
 Their respective licenses are included in any source code that was used. 
 
 Installation:
+
 Harness is bundled in a small Python framework. Python 3.4+ is required because the handler is implemented around the asyncio library. To install Python3.4 as an alternate install you can run the following commands:
 
 	wget http://python.org/ftp/python/3.4.3/Python-3.4.3.tar.xz
