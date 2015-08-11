@@ -1,6 +1,12 @@
 # Harness
 Interactive remote PowerShell Payload
 
+Many thanks to: @ruddawg26, @sploitmonkey, @harmj0y, @sixdub, @mattifestation
+
+Contact:
+
+@RGKelley5, rk5devmail[a t]gmail[d o t]com
+
 Description:
 
 Harness is remote access payload with the ability to provide a remote interactive PowerShell interface from a Windows system to virtually any TCP socket. The primary goal of the Harness Project is to provide a remote interface with the same capabilities and overall feel of the native PowerShell executable bundled with the Windows OS. 
@@ -17,7 +23,9 @@ License:
 Unless otherwise indicated all original Harness code is release under the MIT license. However, ReflectiveHarness draws heavily from the following projects, and would otherwise not have been possible:
 
 https://github.com/leechristensen/UnmanagedPowerShell/tree/master/UnmanagedPowerShell
+
 https://github.com/PowerShellEmpire/PowerTools/blob/master/PowerPick/ReflectivePick
+
 https://github.com/stephenfewer/ReflectiveDLLInjection
 
 Their respective licenses are included in any source code that was used. 
