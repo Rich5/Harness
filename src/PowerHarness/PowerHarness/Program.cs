@@ -569,12 +569,12 @@ namespace Harness
 
             public override void EnterNestedPrompt()
             {
-                throw new NotImplementedException("EnterNestedPrompt is not implemented.  The script is asking for input, which is a problem since there's no console.  Make sure the script can execute without prompting the user for input.");
+                throw new NotImplementedException("EnterNestedPrompt is not implemented. Yet ");
             }
 
             public override void ExitNestedPrompt()
             {
-                throw new NotImplementedException("ExitNestedPrompt is not implemented.  The script is asking for input, which is a problem since there's no console.  Make sure the script can execute without prompting the user for input.");
+                throw new NotImplementedException("ExitNestedPrompt is not implemented. Yet");
             }
 
             public override void NotifyBeginApplication()
