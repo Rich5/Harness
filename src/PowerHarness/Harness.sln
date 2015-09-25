@@ -51,10 +51,10 @@ Global
 		{94DC1CBB-8ECA-4CAC-B64B-DEF7FA40B1D9}.Release|Any CPU.Build.0 = Release|x64
 		{94DC1CBB-8ECA-4CAC-B64B-DEF7FA40B1D9}.Release|Mixed Platforms.ActiveCfg = Release|x64
 		{94DC1CBB-8ECA-4CAC-B64B-DEF7FA40B1D9}.Release|Mixed Platforms.Build.0 = Release|x64
-		{94DC1CBB-8ECA-4CAC-B64B-DEF7FA40B1D9}.Release|Win32.ActiveCfg = Release|Win32
-		{94DC1CBB-8ECA-4CAC-B64B-DEF7FA40B1D9}.Release|Win32.Build.0 = Release|Win32
-		{94DC1CBB-8ECA-4CAC-B64B-DEF7FA40B1D9}.Release|x64.ActiveCfg = Release|Win32
-		{94DC1CBB-8ECA-4CAC-B64B-DEF7FA40B1D9}.Release|x64.Build.0 = Release|Win32
+		{94DC1CBB-8ECA-4CAC-B64B-DEF7FA40B1D9}.Release|Win32.ActiveCfg = Release|x64
+		{94DC1CBB-8ECA-4CAC-B64B-DEF7FA40B1D9}.Release|Win32.Build.0 = Release|x64
+		{94DC1CBB-8ECA-4CAC-B64B-DEF7FA40B1D9}.Release|x64.ActiveCfg = Release|x64
+		{94DC1CBB-8ECA-4CAC-B64B-DEF7FA40B1D9}.Release|x64.Build.0 = Release|x64
 		{94DC1CBB-8ECA-4CAC-B64B-DEF7FA40B1D9}.Release|x86.ActiveCfg = Release|Win32
 		{94DC1CBB-8ECA-4CAC-B64B-DEF7FA40B1D9}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection

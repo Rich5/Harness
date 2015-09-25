@@ -1,15 +1,15 @@
 '''
 
-Harness Toolset
+    Harness Toolset
 
-Copyright (c) 2015 Rich Kelley
+    Copyright (c) 2015 Rich Kelley
 
-Contact: 
-    @RGKelley5
-    RK5DEVMAIL[A T]gmail[D O T]com
-    www.frogstarworldc.com
+    Contact: 
+        @RGKelley5
+        RK5DEVMAIL[A T]gmail[D O T]com
+        www.frogstarworldc.com
 
-License: MIT
+    License: MIT
 
 
 '''
@@ -36,10 +36,11 @@ from collections import OrderedDict
 '''
 class Option:
 
-    def __init__(self, name, value, otype):
+    def __init__(self, name, value, otype, req):
 
         self.name = value
         self.type = otype
+        self.req = req
 
 '''
 
@@ -50,17 +51,19 @@ class Options:
 
     def __init__(self):
         
-        super().__setattr__("opts", {})        
+        super().__setattr__("opts", OrderedDict())        
 
-    def add(self, name, value, otype):
+    def add(self, name, value, otype, req=False):
 
         if otype.lower() not in ('str', 'int', 'list', 'bool', 'float'):
 
             print("[!] Bad option type")  #need to raise framework error when I get around to it
             return
 
-        self.opts[name] = Option(name, value, otype)
-        self.__setattr__(name, value)
+        self.opts[name] = Option(name, value, otype, req)
+
+        if not value == "" and not value == None:
+            self.__setattr__(name, value)
 
     def remove(self, name):
         
@@ -132,6 +135,15 @@ class Options:
             return True
 
         return False
+
+    def required_set(self):
+
+        for key in self.opts:
+            if self.opts[key].req:
+                if self.opts[key].name == "" or self.opts[key].name == None:
+                    return False
+
+        return True
 
 '''
 
@@ -300,10 +312,29 @@ class Framework(cmd.Cmd):
 
             print("Module:")
             _opts = []
+            _opt_name_display = ""
+            _opt_req_display = ""
+
             for name, option in self.options:
-                _opts.append([name, option.name, option.type])
-                
-            print_table(_opts, ("Option", "Value", "Type"), clean_print=True)
+
+                if option.type == "bool":
+                    if option.name:
+                        _opt_name_display = "True"
+                    else:
+                        _opt_name_display = "False"
+                else:
+                    _opt_name_display = option.name
+
+
+                if option.req:
+                    _opt_req_display = "True"
+                else:
+                    _opt_req_display = "False"
+
+
+                _opts.append([name, _opt_name_display, option.type, _opt_req_display])
+            
+            print_table(_opts, ("Option", "Value", "Type", "Required"), clean_print=True)
 
 
     def show_globals(self, args=None):
@@ -311,15 +342,25 @@ class Framework(cmd.Cmd):
         if self.framework_globals:
             print("Globals:")
             _opts = []
+            _opt_name_display = ""
             for name, option in self.framework_globals:
-                _opts.append([name, option.name, option.type])
+
+                if option.type == "bool":
+                    if option.name:
+                        _opt_name_display = "True"
+                    else:
+                        _opt_name_display = "False"
+                else:
+                    _opt_name_display = option.name
+
+                _opts.append([name, _opt_name_display, option.type])
                 
             print_table(_opts, ("Option", "Value", "Type"), clean_print=True)
 
 
-    def add_option(self, name, value, otype):
+    def add_option(self, name, value, otype, req=False):
 
-        self.options.add(name, value, otype)
+        self.options.add(name, value, otype, req)
         self.add_completion('set', name)
 
     def add_global(self, name, value, otype):
@@ -593,6 +634,11 @@ class Framework(cmd.Cmd):
     def _kill_cmd(self, args=None):
 
         JID2del = []
+
+        if not args:
+            self.print_error("Job ID or 'All' required as arg")
+            return
+
         if args.lower() in ('all'):
 
             self.print_alert("killing all background jobs...")
@@ -646,7 +692,7 @@ class Framework(cmd.Cmd):
 
     def print_error(self, outstr):
         
-        print("[+] ", outstr)
+        print("[-] ", outstr)
 
     def print_output(self, outstr):
         
@@ -704,11 +750,11 @@ class Framework(cmd.Cmd):
 
     def help_set(self):
 
-        print("set {var} {value}")
+        print("set {SID} {value}")
 
     def help_setg(self):
 
-        print("setg {var} {value}")
+        print("setg {SID} {value}")
 
 def parse_args(arg):
 
@@ -733,8 +779,8 @@ def print_table(data, fields=(), records_per_page=None, clean_print=None):
     for field in fields:
         row_format += "{:^" + str(lengths[field]) + "}  |  "
         line_format += "{:^" + str(lengths[field]) + "}--+--"
-        clean_row_format += "{:^" + str(lengths[field]) + "}     "
-        clean_line_format += "{:^" + str(lengths[field]) + "}     "
+        clean_row_format += "{:<" + str(lengths[field]) + "}     "
+        clean_line_format += "{:<" + str(lengths[field]) + "}     "
     
     headers = row_format.format(*fields)
     clean_headers = clean_row_format.format(*fields)

@@ -1,15 +1,15 @@
 '''
 
-Harness Toolset
+	Harness Toolset
 
-Copyright (c) 2015 Rich Kelley
+	Copyright (c) 2015 Rich Kelley
 
-Contact: 
-    @RGKelley5
-    RK5DEVMAIL[A T]gmail[D O T]com
-    www.frogstarworldc.com
+	Contact: 
+	    @RGKelley5
+	    RK5DEVMAIL[A T]gmail[D O T]com
+	    www.frogstarworldc.com
 
-License: MIT
+	License: MIT
 
 
 '''
@@ -111,6 +111,14 @@ class ModuleFrame(framework.Framework):
 			_args = framework.parse_args(args)
 		else:
 			_args = (" ")
+
+		if not self.options.required_set():
+			self.allow_print.set()
+			self.print_error("Required options not set")
+			self.print_error("Check 'Required' column\n")
+			self.show_options()
+			self.allow_print.clear()
+			return
 
 		self.stopper.clear()
 		self.allow_print.set()

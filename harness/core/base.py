@@ -1,15 +1,15 @@
 '''
 
-Harness Toolset
+	Harness Toolset
 
-Copyright (c) 2015 Rich Kelley
+	Copyright (c) 2015 Rich Kelley
 
-Contact: 
-    @RGKelley5
-    RK5DEVMAIL[A T]gmail[D O T]com
-    www.frogstarworldc.com
+	Contact: 
+	    @RGKelley5
+	    RK5DEVMAIL[A T]gmail[D O T]com
+	    www.frogstarworldc.com
 
-License: MIT
+	License: MIT
 
 
 '''
@@ -34,6 +34,7 @@ class Harness(framework.Framework):
 		self.intro += "  / /_/ / __ `/ ___/ __ \/ _ \/ ___/ ___/\n"
 		self.intro += " / __  / /_/ / /  / / / /  __(__  |__  )\n"
 		self.intro += "/_/ /_/\__,_/_/  /_/ /_/\___/____/____/\n"
+		self.intro += "\n\tVersion 1.0"
 		self.intro += '\n\n\tProject Harness \n\tAuthor:\tRich Kelley\n\tContact: rk5devmail[A T]gmail, @rgkelley5\n'
 		self.intro += '\nType help or ? to list commands. \n'
 		self.prompt = 'H> '

@@ -1,0 +1,24 @@
+
+
+ == 25 Sep 15 == [ Version 1.0 ]
+
+ - Payload
+ -- Added: sleep commanded to schedule callbacks
+ -- Added: SSL comms
+ -- Implemented (partial) PromptForCredentials method
+ -- Implemented: Readline method
+ -- Fix: write-error
+ -- Fix: write-debug
+ -- Implemented: PromptForChoice method
+ -- Implemented: Prompt method
+ -- General code cleanup
+ -- Fix: remotely imported modules now required to be base64 encoded to avoid script corruption
+
+- Client
+-- General clean-up
+-- Output tables not left justified
+-- modules & options now stored in OrderedDict
+
+
+ == 7 Aug 15 ==
+ - Initial beta release
