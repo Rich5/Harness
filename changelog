@@ -3,7 +3,7 @@
  == 25 Sep 15 == [ Version 1.0 ]
 
  - Payload
- -- Added: sleep commanded to schedule callbacks
+ -- Added: sleep command to schedule callbacks
  -- Added: SSL comms
  -- Implemented (partial) PromptForCredentials method
  -- Implemented: Readline method
