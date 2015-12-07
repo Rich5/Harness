@@ -44,6 +44,16 @@ Harness is bundled in a small Python framework. Python 3.4+ is required because 
 
 Other than installing Python 3, installation only requires that you unzip the Harness folder to a location of your choosing. Currently the framework has only been tested on Kali Linux, and was not designed for Windows. 
 
+*********************************************
+*** UPDATE *** There are known install issues on Kali 2.0. A new install script is in the works. In the mean time run these commands to fix install and autocomplete errors:
+
+	apt-get install libssl-dev openssl
+	apt-get install python3-pip
+	apt-get install libcurses5-dev
+	pip3 install readline
+	python_install.sh
+*********************************************
+
 Starting Harness:
 
 	cd /Harness
