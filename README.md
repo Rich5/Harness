@@ -7,7 +7,7 @@ Contact:
 
 @RGKelley5, rk5devmail[a t]gmail[d o t]com
 
-Info and Usage Guide: www.frogstarworldc.com
+Info and Usage Guide: www.bytesdarkly.com
 
 Description:
 
@@ -49,7 +49,7 @@ Other than installing Python 3, installation only requires that you unzip the Ha
 
 	apt-get install libssl-dev openssl
 	apt-get install python3-pip
-	apt-get install libcurses5-dev
+	apt-get install libncurses5-dev
 	pip3 install readline
 	python_install.sh
 *********************************************
